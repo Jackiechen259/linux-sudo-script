@@ -2,7 +2,9 @@
 set -Eeuo pipefail
 
 # linux-sudo-script
-# Install sudo when missing and grant sudo access to the user running this script.
+#
+# Installs sudo if it is missing and grants full sudo access to the account
+# that launched this script.
 #
 # One-line usage:
 #   bash <(curl -fsSL https://raw.githubusercontent.com/Jackiechen259/linux-sudo-script/main/enable-sudo.sh)
@@ -16,6 +18,13 @@ TARGET_USER="${SUDO_USER:-$(id -un)}"
 
 if [[ ! "$TARGET_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_.-]*$ ]]; then
     error "Unsupported username: $TARGET_USER"
+    exit 1
+fi
+
+# Running directly as root gives us no reliable non-root account to grant.
+if [[ "$TARGET_USER" == "root" ]]; then
+    error "Run this from the normal user account that should receive sudo access."
+    error "If sudo already works, you may also run: sudo bash <(curl -fsSL <URL>)"
     exit 1
 fi
 
@@ -84,17 +93,30 @@ if [[ -z "$VISUDO" ]]; then
     exit 1
 fi
 
-mkdir -p /etc/sudoers.d
-chmod 0750 /etc/sudoers.d
+install -d -o root -g root -m 0750 /etc/sudoers.d
+
+# Ensure /etc/sudoers.d is active. Debian/Ubuntu/Proxmox already ship this,
+# but this also handles minimal images where the include is missing.
+if ! grep -Eq '^[[:space:]]*(@|#)includedir[[:space:]]+/etc/sudoers\.d([[:space:]]|$)' /etc/sudoers; then
+    BACKUP="/etc/sudoers.backup.$(date +%Y%m%d-%H%M%S)"
+    echo "[INFO] /etc/sudoers.d is not included. Creating backup: $BACKUP"
+    cp -a /etc/sudoers "$BACKUP"
+    printf '\n@includedir /etc/sudoers.d\n' >> /etc/sudoers
+
+    if ! "$VISUDO" -cf /etc/sudoers >/dev/null; then
+        echo "[ERROR] sudoers validation failed; restoring backup."
+        cp -a "$BACKUP" /etc/sudoers
+        exit 1
+    fi
+fi
 
 SAFE_USER="${TARGET_USER//./_}"
 SUDOERS_FILE="/etc/sudoers.d/99-user-${SAFE_USER}"
 TMP_SUDOERS="$(mktemp)"
 trap 'rm -f "$TMP_SUDOERS"' EXIT
 
-# Normal sudo access. The user will still be asked for their own password
-# when using sudo; this script does not configure NOPASSWD.
-printf '%s ALL=(ALL:ALL) ALL\n' "$TARGET_USER" > "$TMP_SUDOERS"
+# Standard password-protected sudo access. This does NOT enable NOPASSWD.
+printf '%s ALL=(ALL) ALL\n' "$TARGET_USER" > "$TMP_SUDOERS"
 chmod 0440 "$TMP_SUDOERS"
 
 if ! "$VISUDO" -cf "$TMP_SUDOERS" >/dev/null; then
@@ -104,61 +126,59 @@ fi
 
 install -o root -g root -m 0440 "$TMP_SUDOERS" "$SUDOERS_FILE"
 
-# sudo packages normally include /etc/sudoers.d already. Add the directive
-# only on systems where it is missing.
-if ! grep -Eq '^[[:space:]]*(@|#)includedir[[:space:]]+/etc/sudoers\.d([[:space:]]|$)' /etc/sudoers; then
-    BACKUP="/etc/sudoers.backup.$(date +%Y%m%d-%H%M%S)"
-    echo "[INFO] Backing up /etc/sudoers to $BACKUP"
-    cp -a /etc/sudoers "$BACKUP"
-    printf '\n@includedir /etc/sudoers.d\n' >> /etc/sudoers
-fi
-
 if ! "$VISUDO" -cf /etc/sudoers >/dev/null; then
-    echo "[ERROR] Final sudoers validation failed."
+    rm -f "$SUDOERS_FILE"
+    echo "[ERROR] Final sudoers validation failed. The new entry was removed."
     exit 1
 fi
 
 echo
 echo "[ OK ] sudo is installed and configured."
-echo "[ OK ] User '$TARGET_USER' has sudo access."
+echo "[ OK ] User '$TARGET_USER' now has full sudo access."
 echo "[INFO] sudoers entry: $SUDOERS_FILE"
 ROOT_SCRIPT
 
-chmod 700 "$ROOT_HELPER"
+chmod 0700 "$ROOT_HELPER"
 
 echo
 info "Current account: $TARGET_USER"
 
 if [[ "$(id -u)" -eq 0 ]]; then
-    info "Already running as root."
+    # This path is normally reached only when invoked through sudo, because
+    # direct root execution is rejected above.
     /bin/bash "$ROOT_HELPER" "$TARGET_USER"
 else
-    USED_SUDO=false
+    ELEVATED=false
 
-    # If sudo already exists and this account can authenticate with it,
-    # use it. Otherwise fall back to su/root password.
     if command -v sudo >/dev/null 2>&1; then
-        info "sudo is installed. Checking whether this account can use it..."
-        if sudo -v; then
+        info "sudo is installed. Checking whether this account can already use it..."
+
+        if sudo -n true 2>/dev/null; then
             sudo /bin/bash "$ROOT_HELPER" "$TARGET_USER"
-            USED_SUDO=true
+            ELEVATED=true
         else
-            warn "Current account could not authenticate with sudo."
+            info "sudo may require your user password."
+            if sudo -v; then
+                sudo /bin/bash "$ROOT_HELPER" "$TARGET_USER"
+                ELEVATED=true
+            else
+                warn "sudo authentication failed or this account is not allowed to use sudo."
+            fi
         fi
     fi
 
-    if [[ "$USED_SUDO" != true ]]; then
+    if [[ "$ELEVATED" != true ]]; then
         if ! command -v su >/dev/null 2>&1; then
             error "'su' is not available and sudo could not be used."
             exit 1
         fi
 
         echo
-        info "Root privileges are required."
-        info "Enter the root (su) password when prompted."
+        info "Falling back to su."
+        info "Enter the root password when prompted."
         echo
 
-        # su/PAM reads the root password interactively from the terminal.
+        # su/PAM reads the password directly from the terminal.
         su -c "/bin/bash '$ROOT_HELPER' '$TARGET_USER'"
     fi
 fi
