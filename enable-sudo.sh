@@ -40,6 +40,9 @@ set -Eeuo pipefail
 
 TARGET_USER="$1"
 
+# su -c may omit sbin directories from PATH on Debian/Ubuntu/Proxmox.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
+
 if [[ "$(id -u)" -ne 0 ]]; then
     echo "[ERROR] Root privileges are required."
     exit 1
