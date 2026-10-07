@@ -6,11 +6,19 @@ It is designed primarily for **Debian, Ubuntu, and Proxmox**, while also support
 
 ## One-line usage
 
+### curl
+
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Jackiechen259/linux-sudo-script/main/enable-sudo.sh)
 ```
 
-The script keeps stdin attached to your terminal, so authentication prompts from `sudo` or `su` work normally.
+### wget
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/Jackiechen259/linux-sudo-script/main/enable-sudo.sh)
+```
+
+Both versions keep stdin attached to your terminal, so authentication prompts from `sudo` or `su` work normally.
 
 ## What it does
 
