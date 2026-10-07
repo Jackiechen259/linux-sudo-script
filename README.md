@@ -117,6 +117,12 @@ You need at least one existing path to root privileges:
 
 A Linux system cannot grant new root privileges without an existing root authentication path.
 
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+Copyright (c) 2026 Jackie Chen.
+
 ## Repository
 
 ```text
