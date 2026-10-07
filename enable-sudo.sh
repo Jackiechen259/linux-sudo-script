@@ -6,8 +6,11 @@ set -Eeuo pipefail
 # Installs sudo if it is missing and grants full sudo access to the account
 # that launched this script.
 #
-# One-line usage:
+# One-line usage (curl):
 #   bash <(curl -fsSL https://raw.githubusercontent.com/Jackiechen259/linux-sudo-script/main/enable-sudo.sh)
+#
+# One-line usage (wget):
+#   bash <(wget -qO- https://raw.githubusercontent.com/Jackiechen259/linux-sudo-script/main/enable-sudo.sh)
 
 info()  { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 ok()    { printf '\033[1;32m[ OK ]\033[0m %s\n' "$*"; }
